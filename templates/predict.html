@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html >
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Predict - Fake News Detector App</title>
+  <link rel="shortcut icon" href="{{ url_for('static', filename='assets/square-favicon.png') }}" />
+  <link href='https://fonts.googleapis.com/css?family=Pacifico' rel='stylesheet' type='text/css'>
+  <link href='https://fonts.googleapis.com/css?family=Arimo' rel='stylesheet' type='text/css'>
+  <link href='https://fonts.googleapis.com/css?family=Hind:300' rel='stylesheet' type='text/css'>
+  <link href='https://fonts.googleapis.com/css?family=Open+Sans+Condensed:300' rel='stylesheet' type='text/css'>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+
+  <!-- JS, Popper.js, and jQuery -->
+  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js" integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js" integrity="sha384-9/reFTGAW83EW2RDu2S0VKaIzap3H66lZH81PoYlFhbGU+6BZp6G7niu735Sk7lN" crossorigin="anonymous"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV" crossorigin="anonymous"></script>
+  
+  <style>
+    html{
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  {% include 'includes/_navbar.html' %}
+  <div class="jumbotron" style="height: 100vh;">
+    <div class="container">
+      <div class="title">
+        <h1 class="home-title" style="text-align: center; padding-bottom: 2rem;">Prediction Result</h1>
+        <div class="line-break"></div>
+      </div>
+        <!-- Main Input For Receiving Query to our ML -->
+        <div class="container" style="margin-top: 3rem;">
+          <form action="{{ url_for('predict')}}"method="POST">
+            <div class="row">
+              <div class="input-group input-group-lg mb-3 rounded-circle">
+                <input class="form-control url-box" type="text" name="news" placeholder="Enter the news url" value="{{ url_input }}" required="required"/>
+                <div class="input-group-append">
+                  <button type="submit" class="btn btn-primary btn-block btn-large predict-btn">Check</button>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div class="card predict-card">
+          <div class="card-title">
+            <h4>Based on our classifier result</h4>
+          </div>
+          <div class="card-body">
+            {% if session.logged_in %}
+              {% if prediction_text == 'True' %}
+                <h1>This news is <strong style="color: #1ae191ff;">{{ prediction_text }} ✅</strong></h1>
+                <form action="/history">
+                  <div class="form-group" style="margin-top: 3rem;">
+                    <button type="submit" class="btn btn-primary view-history-btn">View Your History</button>
+                  </div>
+                </form>
+              {% else %}
+                <h1>This news is <strong style="color: rgb(182, 24, 24);">{{ prediction_text }} ❌</strong></h1>
+                <form action="/history">
+                  <div class="form-group" style="margin-top: 3rem;">
+                    <button type="submit" class="btn btn-primary view-history-btn">View Your History</button>
+                  </div>
+                </form>
+              {% endif %}
+            {% else %}
+              {% if prediction_text == 'True' %}
+                <h1>This news is <strong style="color: #1ae191ff; font-weight: 600;">{{ prediction_text }} ✅</strong></h1>
+              {% elif prediction_text == 'False' %}
+                <h1>This news is <strong style="color: rgb(182, 24, 24); font-weight: 600;">{{ prediction_text }} ❌</strong></h1>
+              {% else %}
+                <h1>{{ language_error }} ❌</strong></h1>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
+    </div>
+  </div>
+  <!-- <header style="padding: 30px; font-size: 35px;">
+    <h1><strong>Prediction Result</strong></h1>
+  </header>
+  <section style="display: -webkit-flex; display: flex;">
+    <form action="{{ url_for('predict')}}" method="POST" style="padding-left: 30px;">
+    	<input type="text" name="news" placeholder="Enter the news url" value="{{ url_input }}" required="required" style="border-radius: 50px; border: 1px solid #aaa; margin-bottom: 10px; padding: 10px; width: 700px;"/><br>
+    </form>
+  </section>
+  <section style="display: -webkit-flex; display: flex;">
+    <div class="result" style="border-radius: 20px; border: 1px solid #aaa; margin-top: 30px; margin-left: 30px; padding: 20px; width: 700px; height: 50%">
+      <h2>Based on our classifier result</h2><br><br>
+      <p style="font-size: 20px;">This news is <strong>{{ prediction_text }}</strong></p>
+    </div>  
+  </section> -->
+  
+    <!-- <div class="result" style="border-radius: 20px; border: 1px solid #aaa; margin-top: 30px; margin-left: 30px; padding: 20px; width: 700px; height: 50%">
+      <h2>News Content</h2><br><br>
+      <p style="font-size: 14px;">{{ news }}</p>
+    </div>   -->
+    <!-- <section>
+      <div class="container">
+        <div class="card predict-card">
+          <div class="card-title">
+            <h2>News Content</h2>
+          </div>
+          <div class="card-body">
+            <p style="font-size: 14px;">{{ news }}</p>
+          </div>
+        </div>
+      </div>
+    </section> -->
+    
+  
+  <!-- <section>
+    <form action="/" method="POST" style="padding-left: 30px; padding-top: 30px;">
+    	<button type="submit" class="btn btn-primary btn-block btn-large" style="border-radius: 50px; padding: 10px;">Back to Homepage</button>
+    </form>
+  </section> -->
+ <!-- <div class="login" style="margin: 0 auto; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);" align="center">
+	<h1 style="text-align: center;">Fake News Detector Predict Page</h1>
+
+     <!-- Main Input For Receiving Query to our ML -->
+    <!-- <form action="{{ url_for('predict')}}" method="POST">
+    	<input type="text" name="news" placeholder="Enter the news url" value="{{ url_input }}" required="required" style="border-radius: 50px; border: 1px solid #aaa; margin-bottom: 10px; padding: 10px; width: 700px;"/><br>
+        <button type="submit" class="btn btn-primary btn-block btn-large" style="border-radius: 50px; padding: 10px;">Predict</button>
+
+    </form>
+
+   <br>
+   <br>
+   {{ prediction_text }}
+   <br>
+   <br>
+   {{ url_input }} -->
+
+ <!-- </div> -->
+
+ <!-- {% include 'includes/_footer.html' %} -->
+</body>
+</html>
