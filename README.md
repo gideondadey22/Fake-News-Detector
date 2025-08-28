@@ -8,8 +8,6 @@ CheckThis is a Fake News Detection website developed by Gideon Dadey as part of 
 > Made with :heart: in Ghana
 
 
-![Home Page](assets/homepage.png)
-
 ## :bulb: Motivation
 With the rapid growing rate of information over the internet, the topic of fake news detection on social media has recently attracted tremendous attention. The basic countermeasure of comparing websites against a list of labeled fake news sources is inflexible, and so a machine learning approach is desirable. This project aims to use Natural Language Processing (NLP) and Passive Aggressive Classifier to detect fake news directly, based on the text content of news articles.
 
