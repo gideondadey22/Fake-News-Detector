@@ -16,7 +16,7 @@ With the rapid growing rate of information over the internet, the topic of fake 
 ## :pencil2: Objectives
 1. To investigate and identify the key features of fake news
 2. To design and develop a machine learning based fake news detection system
-3. To validate the effectiveness of a machine learning based fake news detection system
+3. To validate the effectiveness of a machine learning based fake news detection systems
 
 ## :speech_balloon: Dataset Overview
 
