@@ -1,8 +1,11 @@
-# Importing the Libraries
+# app.py
 import os
 import secrets
 import urllib
 import pickle
+from pathlib import Path
+import joblib
+import requests
 import validators
 import numpy as np
 import pandas as pd
@@ -15,6 +18,7 @@ from flask_mysqldb import MySQL
 from werkzeug.security import generate_password_hash, check_password_hash
 from newspaper import Article, Config
 from newsapi import NewsApiClient
+import logging
 
 # --- Config & app setup ---
 secret = secrets.token_urlsafe(32)
@@ -28,12 +32,103 @@ app.config['MYSQL_PASSWORD'] = ''
 app.config['MYSQL_DB'] = 'fakenewsapp_db'
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 log = create_logger(app)
+log.setLevel(logging.INFO)
 
 # MySQL and external APIs
 mysql = MySQL(app)
 newsapi = NewsApiClient(api_key='2aa3ac1960ca48b2a5260ebe34c37e96')
 
-# -----------------------
+# Globals for model artifacts (loaded at startup if available)
+CLEANER = None
+MODEL = None
+LABEL_ENCODER = None
+MODELS_DIR = Path("models")
+
+def find_first_existing(paths):
+    for p in paths:
+        p = Path(p)
+        if p.exists():
+            return p
+    return None
+
+def load_model_artifacts():
+    global CLEANER, MODEL, LABEL_ENCODER
+    # Candidate filenames (keeps backward compatibility with various saved names)
+    vect_candidates = [
+        MODELS_DIR / "vectorizer.joblib",
+        MODELS_DIR / "TfidfVectorizer.joblib",
+        Path("TfidfVectorizer-new.sav"),
+        Path("TfidfVectorizer.sav"),
+        MODELS_DIR / "TfidfVectorizer-new.sav",
+        MODELS_DIR / "TfidfVectorizer.sav",
+    ]
+    model_candidates = [
+        MODELS_DIR / "pac.joblib",
+        MODELS_DIR / "pac.pkl",
+        MODELS_DIR / "ClassifierModel.joblib",
+        Path("ClassifierModel-new.sav"),
+        Path("ClassifierModel.sav"),
+        MODELS_DIR / "ClassifierModel-new.sav",
+        MODELS_DIR / "ClassifierModel.sav",
+    ]
+    le_candidates = [
+        MODELS_DIR / "label_encoder.joblib",
+        MODELS_DIR / "label_encoder.pkl",
+        MODELS_DIR / "le.joblib",
+    ]
+
+    vect_path = find_first_existing(vect_candidates)
+    model_path = find_first_existing(model_candidates)
+    le_path = find_first_existing(le_candidates)
+
+    if not vect_path or not model_path:
+        log.warning("Model artifacts not found on startup. vect: %s model: %s", vect_path, model_path)
+        CLEANER, MODEL, LABEL_ENCODER = None, None, None
+        return
+
+    # Load vectorizer
+    try:
+        CLEANER = joblib.load(vect_path)
+        log.info("Loaded vectorizer from %s", vect_path)
+    except Exception:
+        try:
+            CLEANER = pickle.load(open(vect_path, 'rb'))
+            log.info("Loaded vectorizer (pickle) from %s", vect_path)
+        except Exception as e:
+            CLEANER = None
+            log.exception("Failed loading vectorizer %s: %s", vect_path, e)
+
+    # Load model
+    try:
+        MODEL = joblib.load(model_path)
+        log.info("Loaded model from %s", model_path)
+    except Exception:
+        try:
+            MODEL = pickle.load(open(model_path, 'rb'))
+            log.info("Loaded model (pickle) from %s", model_path)
+        except Exception as e:
+            MODEL = None
+            log.exception("Failed loading model %s: %s", model_path, e)
+
+    # Load label encoder (optional)
+    if le_path and le_path.exists():
+        try:
+            LABEL_ENCODER = joblib.load(le_path)
+            log.info("Loaded label encoder from %s", le_path)
+        except Exception:
+            try:
+                LABEL_ENCODER = pickle.load(open(le_path, 'rb'))
+                log.info("Loaded label encoder (pickle) from %s", le_path)
+            except Exception as e:
+                LABEL_ENCODER = None
+                log.exception("Failed loading label encoder %s: %s", le_path, e)
+    else:
+        LABEL_ENCODER = None
+        log.info("Label encoder not found (optional)")
+
+# Attempt load at startup
+load_model_artifacts()
+
 # Helper: login decorator (session-based)
 def is_logged_in(f):
     @wraps(f)
@@ -45,17 +140,20 @@ def is_logged_in(f):
             return redirect(url_for('login'))
     return wrap
 
-# -----------------------
 # Routes
 @app.route('/', methods=['GET', 'POST'])
 def main():
-    data = newsapi.get_top_headlines(language='en', country="us", category='general', page_size=10)
-    l1 = []
-    l2 = []
-    for i in data.get('articles', []):
-        l1.append(i.get('title'))
-        l2.append(i.get('url'))
-    return render_template('main.html', l1=l1, l2=l2)
+    try:
+        data = newsapi.get_top_headlines(language='en', country="us", category='general', page_size=10)
+        l1 = []
+        l2 = []
+        for i in data.get('articles', []):
+            l1.append(i.get('title'))
+            l2.append(i.get('url'))
+        return render_template('main.html', l1=l1, l2=l2)
+    except Exception as e:
+        log.warning("newsapi failure on main(): %s", e)
+        return render_template('main.html', l1=[], l2=[])
 
 @app.route('/about')
 def about():
@@ -160,83 +258,90 @@ def history():
         msg = 'No History Found'
         return render_template('history.html', msg=msg, record=False)
 
+# Improved predict route: safer fetching, model file fallbacks, better logging
 @app.route('/predict', methods=['GET', 'POST'])
 def predict():
-    """
-    GET: render the prediction page (empty).
-    POST: expect form field 'news' containing the article URL.
-    """
-    # When visiting the page first time show the form
     if request.method == 'GET':
-        # Ensure template variables used in predict.html are defined to avoid Jinja errors
+        # Provide empty values so template doesn't error on initial load
         return render_template('predict.html', prediction_text='', url_input='', language_error='')
 
-    # POST: extract URL from the form
     url = request.form.get('news', '').strip()
-
     if not url:
         flash('Please enter a news site URL', 'danger')
         return redirect(url_for('main'))
 
-    # If user omitted scheme (http/https) add it
+    # Ensure scheme present
     parsed = urllib.parse.urlparse(url)
     if not parsed.scheme:
         url = 'http://' + url
-        parsed = urllib.parse.urlparse(url)
 
-    # validate URL
     if not validators.url(url):
         flash('Please enter a valid news site URL', 'danger')
         return redirect(url_for('main'))
 
-    user_agent = request.headers.get('User-Agent') or 'Mozilla/5.0'
-    config = Config()
-    config.browser_user_agent = user_agent
+    # Setup newspaper config with a sensible UA and timeout
+    user_agent = request.headers.get('User-Agent') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    cfg = Config()
+    cfg.browser_user_agent = user_agent
+    cfg.request_timeout = 10
 
     try:
-        article = Article(str(url), config=config)
+        # Try newspaper first
+        article = Article(url, config=cfg)
         article.download()
         article.parse()
 
-        parsed_text = article.text
-        if not parsed_text:
-            flash('Invalid news article! Please try again', 'danger')
+        # If parse failed to extract text, fallback to requests + feed html to newspaper
+        if not article.text or len(article.text.strip()) < 50:
+            try:
+                r = requests.get(url, headers={"User-Agent": user_agent}, timeout=10)
+                r.raise_for_status()
+                article.set_html(r.text)
+                article.parse()
+            except Exception as re:
+                log.warning("Requests fallback failed for %s: %s", url, re)
+
+        parsed_text = article.text or ""
+        if not parsed_text or len(parsed_text.strip()) == 0:
+            flash('Invalid news article! Could not extract text. Try a different article.', 'danger')
             return redirect(url_for('main'))
 
-        # detect language
+        # detect language (TextBlob can fail; fallback to 'en')
         try:
             b = TextBlob(parsed_text)
             lang = b.detect_language()
         except Exception:
-            # if language detection fails, assume english (or show error)
             lang = 'en'
-
-        if lang != "en":
+        if lang != 'en':
             language_error = "We currently do not support this language"
             return render_template('predict.html', language_error=language_error, url_input=url, prediction_text='')
 
-        # run NLP from newspaper (for e.g. keywords if needed)
-        try:
-            article.nlp()
-            news = article.text
-        except Exception:
-            news = parsed_text
+        # Ensure model artifacts are loaded (load again if None)
+        global CLEANER, MODEL, LABEL_ENCODER
+        if CLEANER is None or MODEL is None:
+            load_model_artifacts()
 
-        if not news:
-            flash('Invalid URL! Please try again', 'danger')
+        if CLEANER is None or MODEL is None:
+            flash('Model files are missing or failed to load. Please run the training script to create model files.', 'danger')
             return redirect(url_for('main'))
 
-        # load vectorizer & model (make sure filenames match actual saved files)
-        cleaner = pickle.load(open('TfidfVectorizer-new.sav', 'rb'))
-        model = pickle.load(open('ClassifierModel-new.sav', 'rb'))
+        # Predict
+        news = parsed_text
+        news_to_predict = [news]
+        cleaned_text = CLEANER.transform(news_to_predict)
+        pred = MODEL.predict(cleaned_text)
 
-        news_to_predict = pd.Series(np.array([news]))
-        cleaned_text = cleaner.transform(news_to_predict)
-        pred = model.predict(cleaned_text)
-        pred_outcome = format(pred[0])
+        # Map numeric label back to original label if encoder exists
+        if LABEL_ENCODER is not None:
+            try:
+                pred_label = LABEL_ENCODER.inverse_transform(pred)[0]
+            except Exception:
+                pred_label = str(pred[0])
+        else:
+            pred_label = str(pred[0])
 
-        # Map model output to display text
-        if pred_outcome in ("0", "REAL", "Real", "TRUE", "True"):
+        # Normalize outcome to the UI expectation "True"/"False"
+        if str(pred_label).lower() in ("real", "true", "1", "0"):
             outcome = "True"
         else:
             outcome = "False"
@@ -247,7 +352,8 @@ def predict():
         return render_template('predict.html', prediction_text=outcome, url_input=url, news=news)
 
     except Exception as e:
-        log.error("Predict error: %s", e)
+        # Log detailed exception so you can inspect in terminal
+        log.exception("Predict error for URL %s: %s", url, e)
         flash('We currently do not support this website or the article could not be parsed! Please try again', 'danger')
         return redirect(url_for('main'))
 
