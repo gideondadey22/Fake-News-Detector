@@ -1,4 +1,3 @@
-# app.py
 import os
 import secrets
 import urllib
@@ -257,6 +256,39 @@ def history():
     else:
         msg = 'No History Found'
         return render_template('history.html', msg=msg, record=False)
+
+# New: Delete history endpoint(s)
+# Two routes map to the same function:
+# - POST /delete_history          -> deletes ALL history for current user
+# - POST /delete_history/<int:hid> -> deletes a single history row (id = hid) for current user
+@app.route('/delete_history', methods=['POST'])
+@app.route('/delete_history/<int:hid>', methods=['POST'])
+@is_logged_in
+def delete_history(hid=None):
+    """
+    If hid is provided, delete that single history row for the logged-in user.
+    If hid is None, delete all history rows for the logged-in user.
+    Maps both routes to the same endpoint name so url_for('delete_history') and
+    url_for('delete_history', hid=...) both build correctly.
+    """
+    user_id = session.get('id')
+    try:
+        cursor = mysql.connection.cursor()
+        if hid is None:
+            # delete all history for user
+            cursor.execute('DELETE FROM history WHERE userID = %s', (user_id,))
+            flash_msg = 'All history cleared'
+        else:
+            # delete a single history row belonging to this user
+            cursor.execute('DELETE FROM history WHERE id = %s AND userID = %s', (hid, user_id))
+            flash_msg = 'History entry deleted'
+        mysql.connection.commit()
+        cursor.close()
+        flash(flash_msg, 'success')
+    except Exception as e:
+        log.error("Failed to delete history (hid=%s) for user %s: %s", hid, user_id, e)
+        flash('Failed to delete history entry', 'danger')
+    return redirect(url_for('history'))
 
 # Improved predict route: safer fetching, model file fallbacks, better logging
 @app.route('/predict', methods=['GET', 'POST'])
